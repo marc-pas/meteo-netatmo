@@ -60,6 +60,8 @@
             box-shadow: 0 4px 15px rgba(0,0,0,0.3);
         }
     </style>
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#4fc3f7">
 </head>
 <body>
     <h1>🌤️ Ma Météo Netatmo</h1>
@@ -202,6 +204,11 @@
         Promise.all([chargerDonnees(), chargerHistorique()]).then(() => {
             document.getElementById('chargement').style.display = 'none';
         });
+    </script>
+    <script>
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('/sw.js');
+    }
     </script>
 </body>
 </html>
