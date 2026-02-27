@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Météo Netatmo</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #1a1a2e;
+            color: #eee;
+            padding: 20px;
+        }
+        h1 {
+            text-align: center;
+            color: #4fc3f7;
+        }
+        h2 {
+            text-align: center;
+            color: #4fc3f7;
+            margin-top: 40px;
+        }
+        .modules {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            justify-content: center;
+            margin-top: 30px;
+        }
+        .card {
+            background-color: #16213e;
+            border-radius: 12px;
+            padding: 20px;
+            width: 220px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+        }
+        .card h2 {
+            font-size: 1.1em;
+            color: #4fc3f7;
+            margin-bottom: 15px;
+            border-bottom: 1px solid #4fc3f7;
+            padding-bottom: 8px;
+            text-align: left;
+        }
+        .mesure {
+            margin: 8px 0;
+            font-size: 0.95em;
+        }
+        .valeur {
+            font-weight: bold;
+            color: #fff;
+        }
+        .graphique-container {
+            background-color: #16213e;
+            border-radius: 12px;
+            padding: 20px;
+            margin: 20px auto;
+            max-width: 900px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+        }
+    </style>
+</head>
+<body>
+    <h1>🌤️ Ma Météo Netatmo</h1>
+    <p id="derniere-mesure" style="text-align:center; color:#aaa; font-size:0.9em; margin-top:-10px;"></p>
+    <div id="chargement" style="text-align:center; margin-top: 40px; font-size: 1.2em; color: #4fc3f7;">
+    ⏳ Chargement des données...
+    </div>
+    <div class="modules" id="modules"></div>
+
+    <h2>📈 Températures sur 7 jours</h2>
+    <div class="graphique-container">
+        <canvas id="graphTemp"></canvas>
+    </div>
+
+    <script>
+        // ---- CARTES TEMPS RÉEL ----
+        async function chargerDonnees() {
+            const response = await fetch('/api/stations');
+            const data = await response.json();
+            const device = data.body.devices[0];
+
+            const modules = [];
+            modules.push({
+                nom: device.module_name,
+                data: device.dashboard_data,
+                types: device.data_type
+            });
+            device.modules.forEach(m => {
+                modules.push({
+                    nom: m.module_name,
+                    data: m.dashboard_data,
+                    types: m.data_type,
+                    batterie: m.battery_percent
+                });
+            });
+
+            const date = new Date(device.dashboard_data.time_utc * 1000);
+            const heure = date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+            const jour = date.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit' });
+            document.getElementById('derniere-mesure').textContent = `🕐 Dernière mesure : ${jour} à ${heure}`;
+            
+            const container = document.getElementById('modules');
+            modules.forEach(m => {
+                const card = document.createElement('div');
+                card.className = 'card';
+                let html = `<h2>${m.nom}</h2>`;
+                if (m.types.includes('Temperature')) {
+                    html += `<div class="mesure">🌡️ Température : <span class="valeur">${m.data.Temperature} °C</span></div>`;
+                    html += `<div class="mesure">↓ Min : <span class="valeur">${m.data.min_temp} °C</span></div>`;
+                    html += `<div class="mesure">↑ Max : <span class="valeur">${m.data.max_temp} °C</span></div>`;
+                }
+                if (m.types.includes('Humidity')) {
+                    html += `<div class="mesure">💧 Humidité : <span class="valeur">${m.data.Humidity} %</span></div>`;
+                }
+                if (m.types.includes('CO2')) {
+                    html += `<div class="mesure">💨 CO2 : <span class="valeur">${m.data.CO2} ppm</span></div>`;
+                }
+                if (m.types.includes('Noise')) {
+                    html += `<div class="mesure">🔊 Bruit : <span class="valeur">${m.data.Noise} dB</span></div>`;
+                }
+                if (m.types.includes('Pressure')) {
+                    html += `<div class="mesure">🔵 Pression : <span class="valeur">${m.data.Pressure} hPa</span></div>`;
+                }
+                if (m.batterie !== undefined) {
+                    html += `<div class="mesure">🔋 Batterie : <span class="valeur">${m.batterie} %</span></div>`;
+                }
+                card.innerHTML = html;
+                container.appendChild(card);
+            });
+        }
+
+        // ---- GRAPHIQUE HISTORIQUE ----
+        async function chargerHistorique() {
+            const modules = [
+                { clé: 'salon',     label: 'Salon',             couleur: '#4fc3f7' },
+                { clé: 'chambre',   label: 'Chambre parentale', couleur: '#f48fb1' },
+                { clé: 'garage',    label: 'Garage',            couleur: '#a5d6a7' },
+                { clé: 'exterieur', label: 'Extérieur',         couleur: '#ffcc80' }
+            ];
+
+            const datasets = [];
+            let labels = [];
+
+            for (const mod of modules) {
+                const response = await fetch(`/api/historique/${mod.clé}`);
+                const data = await response.json();
+
+                const points = [];
+                const temps = [];
+
+                for (const [timestamp, valeurs] of Object.entries(data.body)) {
+                    const date = new Date(parseInt(timestamp) * 1000);
+                    const label = date.toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' })
+                                + ' ' + date.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+                    temps.push({ ts: parseInt(timestamp), label });
+                    points.push({ ts: parseInt(timestamp), val: valeurs[0] });
+                }
+
+                // Trie par timestamp
+                temps.sort((a, b) => a.ts - b.ts);
+                points.sort((a, b) => a.ts - b.ts);
+
+                if (labels.length === 0) {
+                    labels = temps.map(t => t.label);
+                }
+
+                datasets.push({
+                    label: mod.label,
+                    data: points.map(p => p.val),
+                    borderColor: mod.couleur,
+                    backgroundColor: 'transparent',
+                    tension: 0.3,
+                    pointRadius: 2
+                });
+            }
+
+            const ctx = document.getElementById('graphTemp').getContext('2d');
+            new Chart(ctx, {
+                type: 'line',
+                data: { labels, datasets },
+                options: {
+                    responsive: true,
+                    plugins: {
+                        legend: { labels: { color: '#eee' } }
+                    },
+                    scales: {
+                        x: {
+                            ticks: { color: '#aaa', maxTicksLimit: 14 },
+                            grid: { color: '#333' }
+                        },
+                        y: {
+                            ticks: { color: '#aaa', callback: val => val + ' °C' },
+                            grid: { color: '#333' }
+                        }
+                    }
+                }
+            });
+        }
+
+        Promise.all([chargerDonnees(), chargerHistorique()]).then(() => {
+            document.getElementById('chargement').style.display = 'none';
+        });
+    </script>
+</body>
+</html>
